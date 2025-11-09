@@ -57,8 +57,41 @@ mvn exec:java -Dexec.mainClass="com.dqueue.examples.ClusterExample"
 ### Run Tests
 
 ```bash
+# Unit tests
 mvn test
+
+# Integration tests (spins up 3-node cluster)
+mvn test -Dtest=DistributedIntegrationTest
 ```
+
+## Distributed Testing
+
+### Quick Start - 3-Node Cluster
+
+Use the provided script to start a multi-node cluster:
+
+```bash
+# Start 3 nodes
+./run-cluster.sh 3
+
+# In another terminal, run stress test
+./run-stress-test.sh 10 10000 9001 9002 9003
+```
+
+Or manually start nodes:
+
+```bash
+# Terminal 1 - Seed node
+mvn exec:java -Dexec.mainClass="com.dqueue.examples.MultiNodeClusterExample" -Dexec.args="1"
+
+# Terminal 2 - Join cluster
+mvn exec:java -Dexec.mainClass="com.dqueue.examples.MultiNodeClusterExample" -Dexec.args="2 localhost:9001"
+
+# Terminal 3 - Join cluster
+mvn exec:java -Dexec.mainClass="com.dqueue.examples.MultiNodeClusterExample" -Dexec.args="3 localhost:9001"
+```
+
+See [DISTRIBUTED_TESTING.md](DISTRIBUTED_TESTING.md) for comprehensive testing guide.
 
 ## Usage
 
@@ -215,6 +248,63 @@ Throughput: 117,647 messages/second
 Average Latency: 0.008 ms/message
 ```
 
+## Distributed Features
+
+### Node Coordination
+
+The system implements full distributed coordination:
+
+**Cluster Formation**
+- Automatic node discovery
+- Gossip-based cluster membership
+- Health monitoring with heartbeat protocol
+
+**Leader Election**
+- Deterministic leader selection (lowest node ID)
+- Automatic re-election on leader failure
+- Fast failover (<15 seconds)
+
+**Partition Distribution**
+- Consistent hashing with 150 virtual nodes
+- Minimal rebalancing when nodes join/leave
+- Even load distribution
+
+**Network Communication**
+- JSON-based RPC protocol over TCP
+- Virtual threads for handling connections
+- Async message passing
+
+See `src/main/java/com/dqueue/cluster/ClusterManager.java` for implementation.
+
+### Testing Distributed Features
+
+**1. Cluster Formation Test**
+```bash
+mvn test -Dtest=DistributedIntegrationTest#testClusterFormation
+```
+
+**2. Distributed Produce/Consume**
+```bash
+mvn test -Dtest=DistributedIntegrationTest#testDistributedProduceConsume
+```
+
+**3. Partition Distribution**
+```bash
+mvn test -Dtest=DistributedIntegrationTest#testPartitionDistribution
+```
+
+**4. Node Failure & Failover**
+- Start 3-node cluster
+- Kill leader node
+- Verify new leader elected
+- Confirm messages still accessible
+
+**5. Stress Test**
+```bash
+./run-stress-test.sh 50 10000 9001 9002 9003
+# 50 producers, 10K messages each across 3 nodes
+```
+
 ## Design Decisions
 
 ### Why Virtual Threads?
@@ -224,10 +314,13 @@ Virtual threads (Project Loom) enable handling millions of concurrent connection
 Using `ConcurrentSkipListSet` and atomic operations ensures high throughput under heavy concurrent load without lock contention.
 
 ### Why Consistent Hashing?
-Consistent hashing for partition assignment minimizes data movement when nodes join or leave the cluster.
+Consistent hashing for partition assignment minimizes data movement when nodes join or leave the cluster. With 150 virtual nodes per physical node, we achieve excellent load distribution.
 
 ### Why WAL + Snapshots?
 Write-ahead logging ensures durability while snapshots enable fast recovery without replaying the entire log.
+
+### Why JSON-RPC over TCP?
+Simple text-based protocol makes debugging easier and allows any language to implement clients. Virtual threads handle the I/O overhead efficiently.
 
 ## Monitoring
 
